@@ -6,7 +6,7 @@ Qualitative feedback analysis — dynamic topic modelling + sentiment scoring, f
 
 ## Background
 
-TextSense v2 is a ground-up rebuild of [PICTSense](https://github.com/yanchies/PICTSense), a survey analysis tool originally built to process open-ended feedback. PICTSense proved the concept well, but was tightly coupled to a single use case: it had a hardcoded `OER` column, nine predefined military-specific topic categories, and a Streamlit frontend.
+TextSense v2 is a ground-up rebuild of [PICTSense](https://github.com/yanchies/PICTSense), a survey analysis tool originally built to process open-ended feedback. PICTSense proved the concept well, but was tightly coupled to a single use case: it had a hardcoded `OER` column, predefined topic categories, and a Streamlit frontend.
 
 TextSense generalises the same core idea — extract meaning from free-text feedback at scale — so it works for any domain: product feedback, employee surveys, customer support transcripts, academic research, and more. Nothing is hardcoded. Topics are derived from the data itself.
 
