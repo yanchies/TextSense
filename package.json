@@ -1,0 +1,12 @@
+{
+  "name": "textsense",
+  "private": true,
+  "scripts": {
+    "start": "concurrently --names \"api,ui\" --prefix-colors \"cyan,magenta\" \"npm run api\" \"npm run ui\"",
+    "api": "cd backend && venv/Scripts/uvicorn app.main:app --reload --reload-dir app --port 8001",
+    "ui": "cd frontend && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

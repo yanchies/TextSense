@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+}
+
+@media print {
+  /* Hide chrome */
+  header, footer, .no-print { display: none !important; }
+
+  /* Reset page background */
+  body, main { background: white !important; }
+  main { padding: 0 !important; max-width: 100% !important; }
+
+  /* Keep cards readable */
+  .rounded-xl { border-radius: 6px !important; }
+
+  /* Avoid breaking topic cards across pages */
+  .grid > * { break-inside: avoid; }
+
+  /* Print colours for sentiment badges */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
