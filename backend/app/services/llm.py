@@ -28,7 +28,14 @@ class LLMProvider:
         max_tokens: int = 512,
         temperature: float = 0.3,
     ) -> str:
-        """Return raw text response."""
+        """Return raw text response.
+
+        An assistant-role message at the end of ``messages`` is treated as a
+        prefill for Anthropic (the model continues from that text).  For
+        OpenAI the prefill message is stripped because ending on an assistant
+        turn is not supported; the prompt content is still conveyed via the
+        user message.
+        """
         if self.provider == "anthropic":
             # Separate optional system message from the rest
             system = ""
@@ -51,12 +58,15 @@ class LLMProvider:
             response = await self._anthropic.messages.create(**kwargs)
             return response.content[0].text
 
-        # OpenAI
+        # OpenAI — trailing assistant messages are not valid; strip any prefill
+        openai_messages = list(messages)
+        if openai_messages and openai_messages[-1]["role"] == "assistant":
+            openai_messages = openai_messages[:-1]
         response = await self._openai.chat.completions.create(
             model=self.model,
             max_tokens=max_tokens,
             temperature=temperature,
-            messages=messages,  # type: ignore[arg-type]
+            messages=openai_messages,  # type: ignore[arg-type]
         )
         return response.choices[0].message.content or ""
 

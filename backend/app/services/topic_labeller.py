@@ -10,7 +10,6 @@ LLM-based topic labelling in two passes:
 import asyncio
 import json
 import random
-import re
 from typing import NamedTuple
 
 from .llm import LLMProvider
@@ -128,11 +127,17 @@ async def _merge_pass(
     return mapping
 
 
-_SECTION_LABELS = ["SUMMARY", "KEY CONCERNS", "SUGGESTIONS", "POSITIVE FEEDBACK"]
-_SECTION_PATTERN = re.compile(
-    r"^(SUMMARY|KEY CONCERNS|SUGGESTIONS|POSITIVE FEEDBACK):\s*(.+?)(?=\n(?:SUMMARY|KEY CONCERNS|SUGGESTIONS|POSITIVE FEEDBACK):|$)",
-    re.MULTILINE | re.DOTALL,
-)
+async def _ask(prompt: str, llm: LLMProvider) -> str:
+    """Single focused question → plain text answer, hard-capped at 60 tokens."""
+    raw = await llm.complete(
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=60,
+        temperature=0,
+    )
+    text = raw.strip()
+    if text.lower().startswith("none"):
+        return ""
+    return text
 
 
 async def _summarise_topic(
@@ -141,55 +146,36 @@ async def _summarise_topic(
     llm: LLMProvider,
 ) -> str:
     """
-    Returns a JSON string with keys: summary, key_concerns, suggestions, positive_feedback.
-    Uses labeled plain-text output instead of JSON so the model reliably fills each section.
+    Returns a JSON string: {summary, key_concerns, suggestions, positive_feedback}.
+    Uses four separate focused questions run in parallel — one per field.
+    This is more reliable than asking the model to fill a multi-field JSON at once.
     """
     random.seed(_RANDOM_SEED)
     sample = random.sample(responses, min(20, len(responses)))
-    numbered = "\n".join(f"- {r}" for r in sample)
+    context = "\n".join(f"- {r}" for r in sample)
+    base = f"These are survey responses about '{label}':\n{context}\n\n"
 
-    raw = await llm.complete(
-        messages=[
-            {
-                "role": "system",
-                "content": "You write concise, neutral analyses of survey feedback.",
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Topic: {label}\n\n"
-                    f"Sample responses:\n{numbered}\n\n"
-                    "Write an analysis using exactly these four labeled sections. "
-                    "Start each section on a new line with the label in capitals followed by a colon.\n\n"
-                    "SUMMARY: 1-2 sentences on what this topic broadly covers.\n"
-                    "KEY CONCERNS: 1-2 sentences on the specific problems or complaints raised.\n"
-                    "SUGGESTIONS: 1-2 sentences on improvements respondents requested. "
-                    "Write 'None mentioned.' if absent.\n"
-                    "POSITIVE FEEDBACK: 1-2 sentences on what respondents praised. "
-                    "Write 'None mentioned.' if absent.\n\n"
-                    "Plain prose only — no markdown, no bullets, no topic name as a prefix."
-                ),
-            },
-        ],
-        max_tokens=400,
-        temperature=0.3,
+    rules = ("One sentence only — under 30 words. "
+             "No lists, no enumerations. "
+             "Name the overall theme, not individual items. "
+             "No heading or label at the start.")
+
+    summary, concerns, suggestions, positive = await asyncio.gather(
+        _ask(base + "What is this topic broadly about? Give a high-level overview only — "
+             f"no complaints or suggestions. {rules}", llm),
+        _ask(base + "What are the main problems or complaints respondents raised? "
+             f"Start with 'None mentioned.' if there are none. {rules}", llm),
+        _ask(base + "What are the main improvements or changes respondents requested? "
+             f"Start with 'None mentioned.' if there are none. {rules}", llm),
+        _ask(base + "What did respondents explicitly praise or express satisfaction about? "
+             f"Start with 'None mentioned.' if there are none. {rules}", llm),
     )
 
-    sections: dict[str, str] = {}
-    for match in _SECTION_PATTERN.finditer(raw):
-        key = match.group(1).lower().replace(" ", "_")
-        val = match.group(2).strip()
-        sections[key] = "" if val.lower().startswith("none mentioned") else val
-
-    # Fallback: put the whole response in summary if parsing found nothing
-    if not sections:
-        sections["summary"] = raw.strip()
-
     return json.dumps({
-        "summary":           sections.get("summary", ""),
-        "key_concerns":      sections.get("key_concerns", ""),
-        "suggestions":       sections.get("suggestions", ""),
-        "positive_feedback": sections.get("positive_feedback", ""),
+        "summary":           summary,
+        "key_concerns":      concerns,
+        "suggestions":       suggestions,
+        "positive_feedback": positive,
     })
 
 

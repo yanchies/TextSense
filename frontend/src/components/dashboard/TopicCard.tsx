@@ -12,52 +12,50 @@ const PALETTE = [
   "bg-cyan-50 border-cyan-200",
 ];
 
-function sentimentClass(score: number): string {
+function sentimentClass(score: number) {
   if (score >= 6.5) return "text-emerald-600 bg-emerald-50 border border-emerald-200";
   if (score >= 4.0) return "text-amber-600 bg-amber-50 border border-amber-200";
   return "text-red-500 bg-red-50 border border-red-200";
 }
 
-interface StructuredSummary {
+interface Structured {
   summary: string;
   key_concerns: string;
   suggestions: string;
-  positive_feedback?: string;
+  positive_feedback: string;
 }
 
-function parseSummary(raw: string): StructuredSummary | null {
+function parseStructured(raw: string): Structured | null {
   try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && "summary" in parsed) {
-      return parsed as StructuredSummary;
+    const p = JSON.parse(raw);
+    if (p && typeof p === "object" && "summary" in p) {
+      return {
+        summary:          String(p.summary          ?? ""),
+        key_concerns:     String(p.key_concerns     ?? ""),
+        suggestions:      String(p.suggestions      ?? ""),
+        positive_feedback:String(p.positive_feedback ?? ""),
+      };
     }
-  } catch {
-    // fall through
-  }
+  } catch {/* fall through */}
   return null;
 }
 
-/** Strip markdown formatting and LLM-added "Topic - Section:" prefixes. */
 function cleanField(text: string): string {
-  if (!text) return text;
   return text
-    .replace(/^#+\s+/gm, "")                          // heading markers
-    .replace(/\*\*(.+?)\*\*/g, "$1")                   // bold
-    .replace(/\*(.+?)\*/g, "$1")                        // italic
-    .replace(/`(.+?)`/g, "$1")                          // inline code
-    .replace(                                            // "Topic - Section type" prefix (with or without colon)
-      /^.+?[-–]\s*(?:feedback\s+)?(?:summary|key concerns?|suggestions?|positive feedback|improvements?)[:\s]*/i,
-      "",
-    )
+    .replace(/^#+\s+/gm, "")                   // markdown headings
+    .replace(/\*\*(.+?)\*\*/g, "$1")            // bold
+    .replace(/\*(.+?)\*/g, "$1")               // italic
+    .replace(/`(.+?)`/g, "$1")                 // inline code
+    // "Topic - Section type:" prefix
+    .replace(/^.+?[-–]\s*(?:feedback\s+)?(?:summary|key concerns?|suggestions?|positive feedback|improvements?)[:\s]*/gi, "")
+    // "Summary of X:" or "Overview of X:" standalone label at start
+    .replace(/^(?:overview|summary)(?:\s+of\s+[^.]+)?[:\s]+/gi, "")
+    // "X:" label at start of line (e.g. "Overview:", "Problems:")
+    .replace(/^\w[\w\s]{0,30}:\s+/, "")
     .trim();
 }
 
-interface SectionProps {
-  heading: string;
-  body: string;
-}
-
-function Section({ heading, body }: SectionProps) {
+function SectionBlock({ heading, body }: { heading: string; body: string }) {
   const cleaned = cleanField(body);
   if (!cleaned) return null;
   return (
@@ -80,20 +78,23 @@ export function TopicCard({ topic, index, totalResponses }: Props) {
   const [expanded, setExpanded] = useState(false);
   const palette = PALETTE[index % PALETTE.length];
   const pct = Math.round((topic.count / totalResponses) * 100);
-  const structured = parseSummary(topic.llm_summary);
+  const structured = parseStructured(topic.llm_summary);
 
   return (
     <div className={cn("rounded-xl border p-5 transition-all", palette)}>
       {/* Header */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <h3 className="font-semibold text-slate-800 text-sm">{topic.label}</h3>
-        <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded", sentimentClass(topic.avg_sentiment))}>
-          {topic.avg_sentiment.toFixed(1)} / 10
-        </span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3 className="font-semibold text-slate-800 text-sm">{topic.label}</h3>
+          <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded", sentimentClass(topic.avg_sentiment))}>
+            {topic.avg_sentiment.toFixed(1)} / 10
+          </span>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs font-semibold text-slate-600">{topic.count} responses</p>
+          <p className="text-xs text-slate-400">{pct}% of total</p>
+        </div>
       </div>
-      <p className="text-xs text-slate-400 mt-0.5">
-        {topic.count} responses · {pct}% of total
-      </p>
 
       {/* Working definition */}
       <div className="mt-3 pt-3 border-t border-black/5">
@@ -103,20 +104,15 @@ export function TopicCard({ topic, index, totalResponses }: Props) {
         <p className="text-xs text-slate-600 italic leading-relaxed">{topic.description}</p>
       </div>
 
-      {/* Structured sections */}
+      {/* Structured analysis sections */}
       <div className="mt-3 pt-3 border-t border-black/5 space-y-3">
         {structured ? (
           <>
-            <Section heading="Summary" body={structured.summary} />
-            <Section heading="Key Concerns" body={structured.key_concerns} />
-            <Section heading="Suggestions for Improvement" body={structured.suggestions} />
-            {structured.positive_feedback && (
-              <Section heading="Positive Feedback" body={structured.positive_feedback} />
-            )}
+            <SectionBlock heading="Key Concerns" body={structured.key_concerns} />
+            <SectionBlock heading="Suggestions for Improvement" body={structured.suggestions} />
+            <SectionBlock heading="Positive Feedback" body={structured.positive_feedback} />
           </>
-        ) : (
-          <Section heading="Summary" body={topic.llm_summary} />
-        )}
+        ) : null}
       </div>
 
       {/* Sample responses toggle */}
@@ -124,13 +120,18 @@ export function TopicCard({ topic, index, totalResponses }: Props) {
         onClick={() => setExpanded((v) => !v)}
         className="flex items-center gap-1 text-xs text-slate-400 mt-3 hover:text-slate-600 transition-colors"
       >
-        {expanded ? <><ChevronUp size={14} /> Hide samples</> : <><ChevronDown size={14} /> Show sample responses</>}
+        {expanded
+          ? <><ChevronUp size={14} /> Hide samples</>
+          : <><ChevronDown size={14} /> Show sample responses</>}
       </button>
 
       {expanded && (
         <ul className="mt-3 space-y-2">
           {topic.sample_responses.map((r, i) => (
-            <li key={i} className="text-xs text-slate-600 bg-white/70 rounded-lg px-3 py-2 border border-white">
+            <li
+              key={i}
+              className="text-xs text-slate-600 bg-white/70 rounded-lg px-3 py-2 border border-white"
+            >
               {r}
             </li>
           ))}
